@@ -465,14 +465,7 @@
                 </div>
                 <button type="button" id="closeCalendarBtn" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors"><span data-i18n="backHome">กลับหน้าหลัก</span></button>
             </div>
-            <div id="calendarAuthGate" class="rounded-xl border border-rose-400/30 bg-slate-900/70 p-6 text-center">
-                <div class="text-4xl mb-3">🔐</div>
-                <h4 class="text-xl font-bold text-white">เข้าสู่ระบบเพื่อดูปฏิทินงาน</h4>
-                <p id="calendarAuthMessage" class="text-sm text-gray-300 mt-2">ใช้ Gmail ที่ได้รับอนุญาตให้เข้าถึงปฏิทิน</p>
-                <button type="button" id="calendarGoogleSignInBtn" class="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white text-gray-800 font-semibold hover:bg-gray-100 shadow-lg">เข้าสู่ระบบด้วย Google</button>
-                <button type="button" id="calendarGoogleSignOutBtn" class="hidden mt-5 ml-2 px-5 py-2.5 rounded-lg bg-gray-600 text-white hover:bg-gray-500">ออกจากระบบปฏิทิน</button>
-            </div>
-            <div id="calendarFrameWrap" class="hidden w-full overflow-hidden rounded-xl bg-white shadow-inner" style="height: min(75vh, 760px); min-height: 520px;">
+            <div class="w-full overflow-hidden rounded-xl bg-white shadow-inner" style="height: min(75vh, 760px); min-height: 520px;">
                 <iframe id="workCalendarIframe" src="https://calendar.google.com/calendar/embed?src=iqhufm8ntnmce5ot47l5lnqr9c%40group.calendar.google.com&ctz=Asia%2FBangkok" style="border:0" width="100%" height="100%" frameborder="0" scrolling="no" title="ปฏิทินงาน Google Calendar"></iframe>
             </div>
             <p class="text-xs text-gray-500 mt-3">หากปฏิทินหรือรายละเอียดกิจกรรมถูกจำกัดสิทธิ์ ผู้ใช้งานอาจต้องเข้าสู่ระบบ Gmail ตามสิทธิ์ของปฏิทิน</p>
@@ -952,10 +945,6 @@
             firebase.initializeApp(firebaseConfig);
             const db = firebase.firestore();
             const auth = firebase.auth();
-            // เปลี่ยนรายการนี้เป็น Gmail ที่ได้รับอนุญาตให้ดูปฏิทินงาน
-            const CALENDAR_ALLOWED_EMAILS = ['safareelabaisor@gmail.com'];
-            const calendarLoginStorageKey = 'egatMapCalendarGoogleEmail';
-            auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(error => console.warn('ตั้งค่าการจำเซสชัน Calendar ไม่สำเร็จ:', error));
             // แชร์ตัวเชื่อม Firebase ให้สคริปต์อื่นในไฟล์เดียวกันใช้งานได้
             window.appFirestore = db;
             window.appAuth = auth;
@@ -1274,11 +1263,6 @@
             const calendarBtn = document.getElementById('calendarBtn');
             const calendarSection = document.getElementById('calendarSection');
             const closeCalendarBtn = document.getElementById('closeCalendarBtn');
-            const calendarAuthGate = document.getElementById('calendarAuthGate');
-            const calendarAuthMessage = document.getElementById('calendarAuthMessage');
-            const calendarGoogleSignInBtn = document.getElementById('calendarGoogleSignInBtn');
-            const calendarGoogleSignOutBtn = document.getElementById('calendarGoogleSignOutBtn');
-            const calendarFrameWrap = document.getElementById('calendarFrameWrap');
             const favoritesBtn = document.getElementById('favoritesBtn');
             const recentBtn = document.getElementById('recentBtn');
             const refreshPageBtn = document.getElementById('refreshPageBtn');
@@ -1325,57 +1309,6 @@
                 calendarSection?.classList.toggle('hidden', !showCalendar);
                 if (showCalendar) window.recordUsageHistory?.('calendar', 'ปฏิทินงาน', 'เปิดหน้าปฏิทินงาน Google Calendar');
             };
-            const isCalendarGoogleUser = user => Boolean(user?.providerData?.some(provider => provider.providerId === 'google.com'));
-            const isCalendarEmailAllowed = email => CALENDAR_ALLOWED_EMAILS.map(value => value.toLowerCase()).includes(String(email || '').toLowerCase());
-            const updateCalendarAuthView = user => {
-                const email = user?.email || '';
-                const authorized = isCalendarGoogleUser(user) && isCalendarEmailAllowed(email) && localStorage.getItem(calendarLoginStorageKey) === email.toLowerCase();
-                if (authorized) {
-                    calendarAuthGate?.classList.add('hidden');
-                    calendarFrameWrap?.classList.remove('hidden');
-                    calendarGoogleSignInBtn?.classList.add('hidden');
-                    calendarGoogleSignOutBtn?.classList.remove('hidden');
-                    if (calendarAuthMessage) calendarAuthMessage.textContent = `เข้าสู่ระบบแล้ว: ${email}`;
-                    return;
-                }
-                calendarAuthGate?.classList.remove('hidden');
-                calendarFrameWrap?.classList.add('hidden');
-                calendarGoogleSignInBtn?.classList.remove('hidden');
-                calendarGoogleSignOutBtn?.classList.add('hidden');
-                if (user && isCalendarGoogleUser(user) && !isCalendarEmailAllowed(email)) {
-                    if (calendarAuthMessage) calendarAuthMessage.textContent = `บัญชี ${email} ไม่มีสิทธิ์เข้าถึงปฏิทินนี้`;
-                } else if (calendarAuthMessage) {
-                    calendarAuthMessage.textContent = 'ใช้ Gmail ที่ได้รับอนุญาตให้เข้าถึงปฏิทิน';
-                }
-            };
-            calendarGoogleSignInBtn?.addEventListener('click', async () => {
-                calendarGoogleSignInBtn.disabled = true;
-                if (calendarAuthMessage) calendarAuthMessage.textContent = 'กำลังเปิดหน้าล็อกอิน Google...';
-                try {
-                    const provider = new firebase.auth.GoogleAuthProvider();
-                    provider.setCustomParameters({ prompt: 'select_account' });
-                    const result = await auth.signInWithPopup(provider);
-                    const email = result.user?.email || '';
-                    if (!isCalendarEmailAllowed(email)) {
-                        localStorage.removeItem(calendarLoginStorageKey);
-                        if (calendarAuthMessage) calendarAuthMessage.textContent = `บัญชี ${email} ไม่มีสิทธิ์เข้าถึงปฏิทินนี้`;
-                        updateCalendarAuthView(result.user);
-                        return;
-                    }
-                    localStorage.setItem(calendarLoginStorageKey, email.toLowerCase());
-                    updateCalendarAuthView(result.user);
-                } catch (error) {
-                    console.error('Calendar Google sign-in failed:', error);
-                    if (calendarAuthMessage) calendarAuthMessage.textContent = error.code === 'auth/popup-blocked' ? 'เบราว์เซอร์บล็อกหน้าต่างล็อกอิน กรุณาอนุญาต Popup แล้วลองใหม่' : 'เข้าสู่ระบบ Google ไม่สำเร็จ กรุณาลองใหม่';
-                } finally {
-                    calendarGoogleSignInBtn.disabled = false;
-                }
-            });
-            calendarGoogleSignOutBtn?.addEventListener('click', () => {
-                localStorage.removeItem(calendarLoginStorageKey);
-                updateCalendarAuthView(auth.currentUser);
-            });
-            auth.onAuthStateChanged(updateCalendarAuthView);
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             let voiceRecognition = null;
             const setVoiceStatus = message => { if (voiceCommandStatus) voiceCommandStatus.textContent = message; };
