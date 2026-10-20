@@ -487,6 +487,34 @@
                     <button type="button" id="upcomingEventsNextBtn" class="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">หน้าถัดไป</button>
                 </div>
             </div>
+            <div class="mb-4 rounded-xl border border-indigo-400/30 bg-slate-900/70 p-4">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-semibold text-white">กรองปฏิทิน:</span>
+                    <select id="calendarFilterSelect" class="rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white">
+                        <option value="all">แสดงทั้งหมด</option>
+                        <option value="work">แสดงเฉพาะปฏิทินงาน</option>
+                        <option value="holiday">แสดงเฉพาะวันหยุด</option>
+                    </select>
+                    <select id="calendarViewSelect" class="rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white">
+                        <option value="MONTH">รายเดือน</option>
+                        <option value="WEEK">รายสัปดาห์</option>
+                        <option value="DAY">รายวัน</option>
+                    </select>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                    <button type="button" id="printCalendarBtn" class="rounded-lg bg-gray-600 px-3 py-2 text-sm text-white hover:bg-gray-500">พิมพ์ปฏิทิน</button>
+                    <button type="button" id="exportCalendarPdfBtn" class="rounded-lg bg-red-600 px-3 py-2 text-sm text-white hover:bg-red-700">บันทึกเป็น PDF</button>
+                    <button type="button" id="exportCalendarCsvBtn" class="rounded-lg bg-emerald-600 px-3 py-2 text-sm text-white hover:bg-emerald-700">ส่งออกตารางงาน</button>
+                    <button type="button" id="shareCalendarBtn" class="rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700">แชร์ลิงก์ปฏิทิน</button>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-300">
+                    <span><b class="text-red-400">■</b> วันหยุดราชการ</span>
+                    <span><b class="text-blue-400">■</b> ปฏิทินงาน/วันทำงาน</span>
+                    <span><b class="text-yellow-300">■</b> วันปัจจุบันมีกรอบเน้นโดย Google Calendar</span>
+                    <span class="text-gray-400">วันหยุดสุดสัปดาห์ใช้พื้นอ่อนตามมุมมองของ Google Calendar</span>
+                </div>
+                <p id="calendarToolsStatus" class="mt-2 text-xs text-gray-400" aria-live="polite"></p>
+            </div>
             <div class="w-full overflow-hidden rounded-xl bg-white shadow-inner" style="height: min(75vh, 760px); min-height: 520px;">
                 <iframe id="workCalendarIframe" src="https://calendar.google.com/calendar/embed?src=iqhufm8ntnmce5ot47l5lnqr9c%40group.calendar.google.com&color=%234285F4&src=th.th%23holiday%40group.v.calendar.google.com&color=%23DB4437&ctz=Asia%2FBangkok" style="border:0" width="100%" height="100%" frameborder="0" scrolling="no" title="ปฏิทินงานและวันหยุดประเทศไทย Google Calendar"></iframe>
             </div>
@@ -1295,6 +1323,14 @@
             const upcomingEventsPrevBtn = document.getElementById('upcomingEventsPrevBtn');
             const upcomingEventsNextBtn = document.getElementById('upcomingEventsNextBtn');
             const upcomingEventsPageInfo = document.getElementById('upcomingEventsPageInfo');
+            const workCalendarIframe = document.getElementById('workCalendarIframe');
+            const calendarFilterSelect = document.getElementById('calendarFilterSelect');
+            const calendarViewSelect = document.getElementById('calendarViewSelect');
+            const printCalendarBtn = document.getElementById('printCalendarBtn');
+            const exportCalendarPdfBtn = document.getElementById('exportCalendarPdfBtn');
+            const exportCalendarCsvBtn = document.getElementById('exportCalendarCsvBtn');
+            const shareCalendarBtn = document.getElementById('shareCalendarBtn');
+            const calendarToolsStatus = document.getElementById('calendarToolsStatus');
             const UPCOMING_EVENTS_ALLOWED_EMAIL = 'egat.zone3@gmail.com';
             const UPCOMING_EVENTS_CALENDAR_ID = 'iqhufm8ntnmce5ot47l5lnqr9c@group.calendar.google.com';
             // ใส่ OAuth 2.0 Client ID จาก Google Cloud Console ก่อนใช้งานจริง
@@ -1305,6 +1341,10 @@
             let upcomingEventsCache = [];
             let upcomingEventsPage = 1;
             const UPCOMING_EVENTS_PAGE_SIZE = 10;
+            const WORK_CALENDAR_ID = 'iqhufm8ntnmce5ot47l5lnqr9c@group.calendar.google.com';
+            const HOLIDAY_CALENDAR_ID = 'th.th#holiday@group.v.calendar.google.com';
+            let selectedCalendarFilter = 'all';
+            let selectedCalendarView = 'MONTH';
             let dashboardCharts = {};
             let favoritesOnly = false;
             const mainViewSections = [
@@ -1356,6 +1396,62 @@
                 const date = new Date(eventStart);
                 if (allDay) return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeZone: 'Asia/Bangkok' }).format(date);
                 return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(date);
+            };
+            const buildCalendarEmbedUrl = () => {
+                const params = new URLSearchParams();
+                params.set('ctz', 'Asia/Bangkok');
+                params.set('mode', selectedCalendarView);
+                params.set('showTitle', '0');
+                params.set('showPrint', '0');
+                params.set('showTabs', '0');
+                params.set('showCalendars', '0');
+                if (selectedCalendarFilter !== 'holiday') {
+                    params.append('src', WORK_CALENDAR_ID);
+                    params.append('color', '#4285F4');
+                }
+                if (selectedCalendarFilter !== 'work') {
+                    params.append('src', HOLIDAY_CALENDAR_ID);
+                    params.append('color', '#DB4437');
+                }
+                return `https://calendar.google.com/calendar/embed?${params.toString()}`;
+            };
+            const refreshCalendarEmbed = () => {
+                if (workCalendarIframe) workCalendarIframe.src = buildCalendarEmbedUrl();
+                if (calendarToolsStatus) calendarToolsStatus.textContent = selectedCalendarFilter === 'work' ? 'แสดงปฏิทินงานสีน้ำเงิน' : selectedCalendarFilter === 'holiday' ? 'แสดงวันหยุดราชการสีแดง' : 'แสดงปฏิทินงานและวันหยุดร่วมกัน';
+            };
+            const openCalendarForPrint = () => {
+                const printWindow = window.open(buildCalendarEmbedUrl(), '_blank', 'noopener,noreferrer');
+                if (!printWindow) {
+                    if (calendarToolsStatus) calendarToolsStatus.textContent = 'เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up';
+                    return;
+                }
+                printWindow.addEventListener('load', () => printWindow.print(), { once: true });
+            };
+            const exportCalendarCsv = () => {
+                if (!upcomingEventsCache.length) {
+                    if (calendarToolsStatus) calendarToolsStatus.textContent = 'ยังไม่มีข้อมูลกิจกรรมสำหรับส่งออก กรุณาเชื่อมต่อปฏิทินก่อน';
+                    return;
+                }
+                const csvEscape = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+                const rows = [['กิจกรรม', 'วันที่เริ่มต้น', 'วันที่สิ้นสุด', 'สถานที่', 'รายละเอียด'], ...upcomingEventsCache.map(event => [event.summary || '', event.start?.dateTime || event.start?.date || '', event.end?.dateTime || event.end?.date || '', event.location || '', event.description || ''])];
+                const csv = '\ufeff' + rows.map(row => row.map(csvEscape).join(',')).join('\r\n');
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `MapEgat-calendar-${new Date().toISOString().slice(0, 10)}.csv`;
+                link.click();
+                URL.revokeObjectURL(url);
+                if (calendarToolsStatus) calendarToolsStatus.textContent = 'ส่งออกตารางงานเป็น CSV แล้ว';
+            };
+            const shareCalendarLink = async () => {
+                const url = `https://calendar.google.com/calendar/u/0/r?cid=${encodeURIComponent(selectedCalendarFilter === 'holiday' ? HOLIDAY_CALENDAR_ID : WORK_CALENDAR_ID)}`;
+                try {
+                    await navigator.clipboard.writeText(url);
+                    if (calendarToolsStatus) calendarToolsStatus.textContent = 'คัดลอกลิงก์ปฏิทินแล้ว';
+                } catch (error) {
+                    window.prompt('คัดลอกลิงก์ปฏิทินนี้', url);
+                }
             };
             const renderUpcomingEvents = (events, page = 1) => {
                 if (!upcomingEventsList) return;
@@ -1440,6 +1536,18 @@
             });
             upcomingEventsPrevBtn?.addEventListener('click', () => renderUpcomingEvents(null, upcomingEventsPage - 1));
             upcomingEventsNextBtn?.addEventListener('click', () => renderUpcomingEvents(null, upcomingEventsPage + 1));
+            calendarFilterSelect?.addEventListener('change', event => {
+                selectedCalendarFilter = event.target.value;
+                refreshCalendarEmbed();
+            });
+            calendarViewSelect?.addEventListener('change', event => {
+                selectedCalendarView = event.target.value;
+                refreshCalendarEmbed();
+            });
+            printCalendarBtn?.addEventListener('click', openCalendarForPrint);
+            exportCalendarPdfBtn?.addEventListener('click', openCalendarForPrint);
+            exportCalendarCsvBtn?.addEventListener('click', exportCalendarCsv);
+            shareCalendarBtn?.addEventListener('click', shareCalendarLink);
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             let voiceRecognition = null;
             const setVoiceStatus = message => { if (voiceCommandStatus) voiceCommandStatus.textContent = message; };
