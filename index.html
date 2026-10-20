@@ -1301,6 +1301,7 @@
             const GOOGLE_CALENDAR_OAUTH_CLIENT_ID = '718108297809-43cjgjoql50i9tso3ehu9s3fm07tgfui.apps.googleusercontent.com';
             const GOOGLE_CALENDAR_SCOPE = 'openid email profile https://www.googleapis.com/auth/calendar.readonly';
             let calendarApiTokenClient = null;
+            let calendarAutoConnectAttempted = false;
             let upcomingEventsCache = [];
             let upcomingEventsPage = 1;
             const UPCOMING_EVENTS_PAGE_SIZE = 10;
@@ -1345,7 +1346,10 @@
                 dashboardSection.classList.add('hidden');
                 mapSection?.classList.add('hidden');
                 calendarSection?.classList.toggle('hidden', !showCalendar);
-                if (showCalendar) window.recordUsageHistory?.('calendar', 'ปฏิทินงาน', 'เปิดหน้าปฏิทินงาน Google Calendar');
+                if (showCalendar) {
+                    window.recordUsageHistory?.('calendar', 'ปฏิทินงาน', 'เปิดหน้าปฏิทินงาน Google Calendar');
+                    window.setTimeout(() => connectUpcomingCalendar({ silent: true }), 150);
+                }
             };
             const escapeCalendarHtml = value => String(value || '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
             const formatCalendarDate = (eventStart, allDay) => {
@@ -1394,7 +1398,7 @@
                 });
                 renderUpcomingEvents(response.result.items || []);
             };
-            const connectUpcomingCalendar = () => {
+            const connectUpcomingCalendar = ({ silent = false } = {}) => {
                 if (!window.google?.accounts?.oauth2) throw new Error('Google Identity Services is not loaded');
                 if (GOOGLE_CALENDAR_OAUTH_CLIENT_ID.startsWith('YOUR_')) {
                     throw new Error('ยังไม่ได้ตั้งค่า Google OAuth Client ID');
@@ -1403,7 +1407,11 @@
                     client_id: GOOGLE_CALENDAR_OAUTH_CLIENT_ID,
                     scope: GOOGLE_CALENDAR_SCOPE,
                     callback: async tokenResponse => {
-                        if (tokenResponse.error) throw new Error(tokenResponse.error);
+                        if (tokenResponse.error) {
+                            if (!silent && upcomingEventsStatus) upcomingEventsStatus.textContent = 'กรุณากดเชื่อมต่อปฏิทินและอนุญาตสิทธิ์อีกครั้ง';
+                            if (connectCalendarApiBtn) connectCalendarApiBtn.disabled = false;
+                            return;
+                        }
                         try {
                             const profileResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${tokenResponse.access_token}` } });
                             const profile = await profileResponse.json();
@@ -1419,7 +1427,7 @@
                         }
                     }
                 });
-                calendarApiTokenClient.requestAccessToken({ prompt: 'consent' });
+                calendarApiTokenClient.requestAccessToken({ prompt: silent ? 'none' : 'consent' });
             };
             connectCalendarApiBtn?.addEventListener('click', () => {
                 connectCalendarApiBtn.disabled = true;
