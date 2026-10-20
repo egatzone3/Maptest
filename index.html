@@ -1290,7 +1290,7 @@
             const UPCOMING_EVENTS_CALENDAR_ID = 'iqhufm8ntnmce5ot47l5lnqr9c@group.calendar.google.com';
             // ใส่ OAuth 2.0 Client ID จาก Google Cloud Console ก่อนใช้งานจริง
             const GOOGLE_CALENDAR_OAUTH_CLIENT_ID = '718108297809-43cjgjoql50i9tso3ehu9s3fm07tgfui.apps.googleusercontent.com';
-            const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+            const GOOGLE_CALENDAR_SCOPE = 'openid email profile https://www.googleapis.com/auth/calendar.readonly';
             let calendarApiTokenClient = null;
             let dashboardCharts = {};
             let favoritesOnly = false;
