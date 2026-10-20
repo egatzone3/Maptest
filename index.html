@@ -9,6 +9,8 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
     <link rel="manifest" href="./manifest.json">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -466,6 +468,18 @@
                 <div class="flex flex-wrap gap-2">
                     <a href="https://mail.google.com/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors" title="เปิด Gmail เพื่อเข้าสู่ระบบ">✉️ เข้าสู่ Gmail.com</a>
                     <button type="button" id="closeCalendarBtn" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors"><span data-i18n="backHome">กลับหน้าหลัก</span></button>
+                </div>
+            </div>
+            <div id="upcomingEventsCard" class="mb-5 rounded-xl border border-blue-400/30 bg-slate-900/70 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h4 class="text-xl font-bold text-white">กิจกรรมที่กำลังจะมาถึง</h4>
+                        <p id="upcomingEventsStatus" class="mt-1 text-sm text-gray-300">เชื่อมต่อด้วยบัญชี egat.zone3@gmail.com เพื่ออ่านกิจกรรม</p>
+                    </div>
+                    <button type="button" id="connectCalendarApiBtn" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700">เชื่อมต่อปฏิทิน</button>
+                </div>
+                <div id="upcomingEventsList" class="mt-4 grid gap-3">
+                    <p class="rounded-lg bg-gray-800/70 p-3 text-sm text-gray-400">ยังไม่ได้เชื่อมต่อ Google Calendar API</p>
                 </div>
             </div>
             <div class="w-full overflow-hidden rounded-xl bg-white shadow-inner" style="height: min(75vh, 760px); min-height: 520px;">
@@ -1269,6 +1283,15 @@
             const favoritesBtn = document.getElementById('favoritesBtn');
             const recentBtn = document.getElementById('recentBtn');
             const refreshPageBtn = document.getElementById('refreshPageBtn');
+            const connectCalendarApiBtn = document.getElementById('connectCalendarApiBtn');
+            const upcomingEventsStatus = document.getElementById('upcomingEventsStatus');
+            const upcomingEventsList = document.getElementById('upcomingEventsList');
+            const UPCOMING_EVENTS_ALLOWED_EMAIL = 'egat.zone3@gmail.com';
+            const UPCOMING_EVENTS_CALENDAR_ID = 'iqhufm8ntnmce5ot47l5lnqr9c@group.calendar.google.com';
+            // ใส่ OAuth 2.0 Client ID จาก Google Cloud Console ก่อนใช้งานจริง
+            const GOOGLE_CALENDAR_OAUTH_CLIENT_ID = '718108297809-43cjgjoql50i9tso3ehu9s3fm07tgfui.apps.googleusercontent.com';
+            const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+            let calendarApiTokenClient = null;
             let dashboardCharts = {};
             let favoritesOnly = false;
             const mainViewSections = [
@@ -1312,6 +1335,79 @@
                 calendarSection?.classList.toggle('hidden', !showCalendar);
                 if (showCalendar) window.recordUsageHistory?.('calendar', 'ปฏิทินงาน', 'เปิดหน้าปฏิทินงาน Google Calendar');
             };
+            const escapeCalendarHtml = value => String(value || '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+            const formatCalendarDate = (eventStart, allDay) => {
+                const date = new Date(eventStart);
+                if (allDay) return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeZone: 'Asia/Bangkok' }).format(date);
+                return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(date);
+            };
+            const renderUpcomingEvents = events => {
+                if (!upcomingEventsList) return;
+                if (!events.length) {
+                    upcomingEventsList.innerHTML = '<p class="rounded-lg bg-gray-800/70 p-3 text-sm text-gray-300">ไม่มีกิจกรรมที่กำลังจะมาถึงในช่วง 60 วัน</p>';
+                    return;
+                }
+                const now = Date.now();
+                upcomingEventsList.innerHTML = events.map(event => {
+                    const startValue = event.start?.dateTime || event.start?.date;
+                    const allDay = Boolean(event.start?.date && !event.start?.dateTime);
+                    const startDate = new Date(startValue);
+                    const daysLeft = Math.max(0, Math.ceil((startDate.getTime() - now) / 86400000));
+                    const remaining = daysLeft === 0 ? 'วันนี้' : daysLeft === 1 ? 'พรุ่งนี้' : `เหลืออีก ${daysLeft} วัน`;
+                    return `<article class="rounded-xl border border-blue-400/20 bg-gray-800/80 p-4 shadow-md"><h5 class="font-bold text-white">${escapeCalendarHtml(event.summary || 'ไม่ระบุชื่อกิจกรรม')}</h5><p class="mt-1 text-sm text-gray-300">วันที่ ${escapeCalendarHtml(formatCalendarDate(startValue, allDay))}</p><p class="mt-2 text-sm font-semibold text-yellow-300">${remaining}</p>${event.location ? `<p class="mt-1 text-xs text-gray-400">สถานที่: ${escapeCalendarHtml(event.location)}</p>` : ''}</article>`;
+                }).join('');
+            };
+            const loadUpcomingCalendarEvents = async accessToken => {
+                if (!window.gapi) throw new Error('Google API library is not loaded');
+                await new Promise((resolve, reject) => window.gapi.load('client', { callback: resolve, onerror: reject }));
+                await window.gapi.client.init({ discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'] });
+                window.gapi.client.setToken({ access_token: accessToken });
+                const response = await window.gapi.client.calendar.events.list({
+                    calendarId: UPCOMING_EVENTS_CALENDAR_ID,
+                    timeMin: new Date().toISOString(),
+                    timeMax: new Date(Date.now() + 60 * 86400000).toISOString(),
+                    maxResults: 6,
+                    singleEvents: true,
+                    orderBy: 'startTime'
+                });
+                renderUpcomingEvents(response.result.items || []);
+            };
+            const connectUpcomingCalendar = () => {
+                if (!window.google?.accounts?.oauth2) throw new Error('Google Identity Services is not loaded');
+                if (GOOGLE_CALENDAR_OAUTH_CLIENT_ID.startsWith('YOUR_')) {
+                    throw new Error('ยังไม่ได้ตั้งค่า Google OAuth Client ID');
+                }
+                calendarApiTokenClient = window.google.accounts.oauth2.initTokenClient({
+                    client_id: GOOGLE_CALENDAR_OAUTH_CLIENT_ID,
+                    scope: GOOGLE_CALENDAR_SCOPE,
+                    callback: async tokenResponse => {
+                        if (tokenResponse.error) throw new Error(tokenResponse.error);
+                        try {
+                            const profileResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${tokenResponse.access_token}` } });
+                            const profile = await profileResponse.json();
+                            if (profile.email?.toLowerCase() !== UPCOMING_EVENTS_ALLOWED_EMAIL) throw new Error(`ต้องใช้บัญชี ${UPCOMING_EVENTS_ALLOWED_EMAIL} เท่านั้น`);
+                            await loadUpcomingCalendarEvents(tokenResponse.access_token);
+                            if (upcomingEventsStatus) upcomingEventsStatus.textContent = `เชื่อมต่อแล้ว: ${profile.email}`;
+                            if (connectCalendarApiBtn) connectCalendarApiBtn.textContent = 'โหลดกิจกรรมใหม่';
+                        } catch (error) {
+                            console.error('Upcoming Calendar API error:', error);
+                            if (upcomingEventsStatus) upcomingEventsStatus.textContent = error.message || 'ไม่สามารถโหลดกิจกรรมได้';
+                        } finally {
+                            if (connectCalendarApiBtn) connectCalendarApiBtn.disabled = false;
+                        }
+                    }
+                });
+                calendarApiTokenClient.requestAccessToken({ prompt: 'consent' });
+            };
+            connectCalendarApiBtn?.addEventListener('click', () => {
+                connectCalendarApiBtn.disabled = true;
+                if (upcomingEventsStatus) upcomingEventsStatus.textContent = 'กำลังเชื่อมต่อ Google Calendar API...';
+                try { connectUpcomingCalendar(); } catch (error) {
+                    console.error(error);
+                    if (upcomingEventsStatus) upcomingEventsStatus.textContent = error.message;
+                    connectCalendarApiBtn.disabled = false;
+                }
+            });
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             let voiceRecognition = null;
             const setVoiceStatus = message => { if (voiceCommandStatus) voiceCommandStatus.textContent = message; };
