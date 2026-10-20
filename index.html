@@ -620,6 +620,16 @@
                     <button id="closeAdminModalBtn" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500">กลับหน้าหลัก</button>
                 </div>
                 <div id="adminContent" class="flex flex-col">
+                    <section id="adminOnlineUsersSection" class="order-first mb-10 border-b border-cyan-500/40 pb-6">
+                        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                            <div>
+                                <h5 class="text-lg font-bold text-cyan-300">ผู้ใช้งานออนไลน์แบบเรียลไทม์</h5>
+                                <p id="adminOnlineUsersSummary" class="text-xs text-gray-400 mt-1">กำลังตรวจสอบผู้ใช้งาน...</p>
+                            </div>
+                            <span class="inline-flex items-center gap-2 rounded-full bg-cyan-900/60 px-3 py-1 text-sm text-cyan-200"><span class="h-2 w-2 rounded-full bg-green-400 animate-pulse"></span>Live</span>
+                        </div>
+                        <div id="adminOnlineUsersList" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+                    </section>
                     <form id="newsForm" class="order-3 space-y-4">
                         <input type="hidden" id="newsId">
                         <div>
@@ -1673,6 +1683,12 @@
             const adminContactMessagesList = document.getElementById('adminContactMessagesList');
             const adminContactSearch = document.getElementById('adminContactSearch');
             const adminContactStatusFilter = document.getElementById('adminContactStatusFilter');
+            const adminOnlineUsersSummary = document.getElementById('adminOnlineUsersSummary');
+            const adminOnlineUsersList = document.getElementById('adminOnlineUsersList');
+            const onlineSessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+            const ONLINE_USER_TIMEOUT_MS = 90 * 1000;
+            let onlineHeartbeatTimer = null;
+            let onlineUsersUnsubscribe = null;
             const contactMessagesSummary = document.getElementById('contactMessagesSummary');
             let adminContactMessages = [];
             let contactMessagesUnsubscribe = null;
@@ -1834,6 +1850,42 @@
                 .then(response => response.ok ? response.json() : Promise.reject(new Error('IP service unavailable')))
                 .then(result => { clientAccessInfo.ip = result.ip || 'ไม่ทราบ IP'; window.clientAccessInfo = clientAccessInfo; if (footerIpAddress) footerIpAddress.textContent = clientAccessInfo.ip; })
                 .catch(() => { clientAccessInfo.ip = 'ไม่สามารถตรวจสอบ IP'; if (footerIpAddress) footerIpAddress.textContent = clientAccessInfo.ip; });
+
+            let onlineUsersSnapshot = [];
+            const escapeOnlineText = value => String(value ?? '-').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+            const renderAdminOnlineUsers = () => {
+                if (!adminOnlineUsersList || !adminOnlineUsersSummary) return;
+                const cutoff = Date.now() - ONLINE_USER_TIMEOUT_MS;
+                const onlineUsers = onlineUsersSnapshot.filter(item => Number(item.lastSeenMs || 0) >= cutoff).sort((a, b) => Number(b.lastSeenMs || 0) - Number(a.lastSeenMs || 0));
+                adminOnlineUsersSummary.textContent = `ขณะนี้มีผู้ใช้งานออนไลน์ ${onlineUsers.length} คน | อัปเดต ${new Date().toLocaleTimeString('th-TH')}`;
+                adminOnlineUsersList.innerHTML = onlineUsers.length ? onlineUsers.map(item => `<article class="rounded-xl border border-green-500/30 bg-gray-800/70 p-3"><div class="flex items-center justify-between gap-2"><strong class="text-white">${escapeOnlineText(item.userEmail || 'ผู้ใช้งานทั่วไป')}</strong><span class="text-xs text-green-300">ออนไลน์</span></div><p class="mt-1 text-xs text-gray-400">${escapeOnlineText(item.device)} | ${escapeOnlineText(item.operatingSystem)}</p><p class="text-xs text-gray-400">เบราว์เซอร์: ${escapeOnlineText(item.browser)} | IP: ${escapeOnlineText(item.ip)}</p><p class="mt-1 text-xs text-cyan-300">ใช้งานครั้งล่าสุด: ${new Date(Number(item.lastSeenMs)).toLocaleTimeString('th-TH')}</p></article>`).join('') : '<p class="rounded-lg bg-gray-800/60 p-3 text-sm text-gray-400">ขณะนี้ยังไม่มีผู้ใช้งานออนไลน์</p>';
+            };
+            const startOnlineHeartbeat = () => {
+                const onlineRef = db.collection('onlineUsers').doc(onlineSessionId);
+                const writeHeartbeat = () => onlineRef.set({ sessionId: onlineSessionId, userEmail: auth.currentUser?.email || 'ผู้ใช้งานทั่วไป', ...clientAccessInfo, lastSeenMs: Date.now(), lastSeen: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(error => console.warn('Online heartbeat failed:', error));
+                writeHeartbeat();
+                if (onlineHeartbeatTimer) clearInterval(onlineHeartbeatTimer);
+                onlineHeartbeatTimer = setInterval(writeHeartbeat, 30000);
+                window.addEventListener('beforeunload', () => onlineRef.delete().catch(() => {}), { once: true });
+            };
+            startOnlineHeartbeat();
+            setInterval(renderAdminOnlineUsers, 15000);
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    if (onlineUsersUnsubscribe) onlineUsersUnsubscribe();
+                    onlineUsersUnsubscribe = db.collection('onlineUsers').onSnapshot(snapshot => {
+                        onlineUsersSnapshot = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        renderAdminOnlineUsers();
+                    }, error => {
+                        if (adminOnlineUsersSummary) adminOnlineUsersSummary.textContent = 'ไม่สามารถโหลดผู้ใช้งานออนไลน์ กรุณาตรวจสอบสิทธิ์ Firestore';
+                        console.warn('Online users listener failed:', error);
+                    });
+                } else if (onlineUsersUnsubscribe) {
+                    onlineUsersUnsubscribe();
+                    onlineUsersUnsubscribe = null;
+                    onlineUsersSnapshot = [];
+                }
+            });
 
             const getHistoryDate = item => item.createdAt?.toDate ? item.createdAt.toDate() : (item.timestamp ? new Date(item.timestamp) : null);
             const getFilteredAdminHistory = () => {
