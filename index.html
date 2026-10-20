@@ -481,6 +481,11 @@
                 <div id="upcomingEventsList" class="mt-4 grid gap-3">
                     <p class="rounded-lg bg-gray-800/70 p-3 text-sm text-gray-400">ยังไม่ได้เชื่อมต่อ Google Calendar API</p>
                 </div>
+                <div id="upcomingEventsPagination" class="hidden mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <button type="button" id="upcomingEventsPrevBtn" class="px-3 py-2 rounded-lg bg-gray-700 text-white text-sm hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40">ย้อนกลับ</button>
+                    <span id="upcomingEventsPageInfo" class="px-3 py-2 text-sm text-gray-300">หน้า 1</span>
+                    <button type="button" id="upcomingEventsNextBtn" class="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">หน้าถัดไป</button>
+                </div>
             </div>
             <div class="w-full overflow-hidden rounded-xl bg-white shadow-inner" style="height: min(75vh, 760px); min-height: 520px;">
                 <iframe id="workCalendarIframe" src="https://calendar.google.com/calendar/embed?src=iqhufm8ntnmce5ot47l5lnqr9c%40group.calendar.google.com&color=%234285F4&src=th.th%23holiday%40group.v.calendar.google.com&color=%23DB4437&ctz=Asia%2FBangkok" style="border:0" width="100%" height="100%" frameborder="0" scrolling="no" title="ปฏิทินงานและวันหยุดประเทศไทย Google Calendar"></iframe>
@@ -1286,12 +1291,19 @@
             const connectCalendarApiBtn = document.getElementById('connectCalendarApiBtn');
             const upcomingEventsStatus = document.getElementById('upcomingEventsStatus');
             const upcomingEventsList = document.getElementById('upcomingEventsList');
+            const upcomingEventsPagination = document.getElementById('upcomingEventsPagination');
+            const upcomingEventsPrevBtn = document.getElementById('upcomingEventsPrevBtn');
+            const upcomingEventsNextBtn = document.getElementById('upcomingEventsNextBtn');
+            const upcomingEventsPageInfo = document.getElementById('upcomingEventsPageInfo');
             const UPCOMING_EVENTS_ALLOWED_EMAIL = 'egat.zone3@gmail.com';
             const UPCOMING_EVENTS_CALENDAR_ID = 'iqhufm8ntnmce5ot47l5lnqr9c@group.calendar.google.com';
             // ใส่ OAuth 2.0 Client ID จาก Google Cloud Console ก่อนใช้งานจริง
             const GOOGLE_CALENDAR_OAUTH_CLIENT_ID = '718108297809-43cjgjoql50i9tso3ehu9s3fm07tgfui.apps.googleusercontent.com';
             const GOOGLE_CALENDAR_SCOPE = 'openid email profile https://www.googleapis.com/auth/calendar.readonly';
             let calendarApiTokenClient = null;
+            let upcomingEventsCache = [];
+            let upcomingEventsPage = 1;
+            const UPCOMING_EVENTS_PAGE_SIZE = 10;
             let dashboardCharts = {};
             let favoritesOnly = false;
             const mainViewSections = [
@@ -1341,14 +1353,20 @@
                 if (allDay) return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeZone: 'Asia/Bangkok' }).format(date);
                 return new Intl.DateTimeFormat('th-TH', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(date);
             };
-            const renderUpcomingEvents = events => {
+            const renderUpcomingEvents = (events, page = 1) => {
                 if (!upcomingEventsList) return;
-                if (!events.length) {
+                if (Array.isArray(events)) upcomingEventsCache = events;
+                const allEvents = upcomingEventsCache;
+                const totalPages = Math.max(1, Math.ceil(allEvents.length / UPCOMING_EVENTS_PAGE_SIZE));
+                upcomingEventsPage = Math.min(Math.max(1, page), totalPages);
+                if (!allEvents.length) {
                     upcomingEventsList.innerHTML = '<p class="rounded-lg bg-gray-800/70 p-3 text-sm text-gray-300">ไม่มีกิจกรรมที่กำลังจะมาถึงในช่วง 60 วัน</p>';
+                    upcomingEventsPagination?.classList.add('hidden');
                     return;
                 }
                 const now = Date.now();
-                upcomingEventsList.innerHTML = events.map(event => {
+                const pageEvents = allEvents.slice((upcomingEventsPage - 1) * UPCOMING_EVENTS_PAGE_SIZE, upcomingEventsPage * UPCOMING_EVENTS_PAGE_SIZE);
+                upcomingEventsList.innerHTML = pageEvents.map(event => {
                     const startValue = event.start?.dateTime || event.start?.date;
                     const allDay = Boolean(event.start?.date && !event.start?.dateTime);
                     const startDate = new Date(startValue);
@@ -1356,6 +1374,10 @@
                     const remaining = daysLeft === 0 ? 'วันนี้' : daysLeft === 1 ? 'พรุ่งนี้' : `เหลืออีก ${daysLeft} วัน`;
                     return `<article class="rounded-xl border border-blue-400/20 bg-gray-800/80 p-4 shadow-md"><h5 class="font-bold text-white">${escapeCalendarHtml(event.summary || 'ไม่ระบุชื่อกิจกรรม')}</h5><p class="mt-1 text-sm text-gray-300">วันที่ ${escapeCalendarHtml(formatCalendarDate(startValue, allDay))}</p><p class="mt-2 text-sm font-semibold text-yellow-300">${remaining}</p>${event.location ? `<p class="mt-1 text-xs text-gray-400">สถานที่: ${escapeCalendarHtml(event.location)}</p>` : ''}</article>`;
                 }).join('');
+                upcomingEventsPagination?.classList.toggle('hidden', totalPages <= 1);
+                if (upcomingEventsPageInfo) upcomingEventsPageInfo.textContent = `หน้า ${upcomingEventsPage} / ${totalPages} (ทั้งหมด ${allEvents.length} กิจกรรม)`;
+                if (upcomingEventsPrevBtn) upcomingEventsPrevBtn.disabled = upcomingEventsPage <= 1;
+                if (upcomingEventsNextBtn) upcomingEventsNextBtn.disabled = upcomingEventsPage >= totalPages;
             };
             const loadUpcomingCalendarEvents = async accessToken => {
                 if (!window.gapi) throw new Error('Google API library is not loaded');
@@ -1366,7 +1388,7 @@
                     calendarId: UPCOMING_EVENTS_CALENDAR_ID,
                     timeMin: new Date().toISOString(),
                     timeMax: new Date(Date.now() + 60 * 86400000).toISOString(),
-                    maxResults: 6,
+                    maxResults: 250,
                     singleEvents: true,
                     orderBy: 'startTime'
                 });
@@ -1408,6 +1430,8 @@
                     connectCalendarApiBtn.disabled = false;
                 }
             });
+            upcomingEventsPrevBtn?.addEventListener('click', () => renderUpcomingEvents(null, upcomingEventsPage - 1));
+            upcomingEventsNextBtn?.addEventListener('click', () => renderUpcomingEvents(null, upcomingEventsPage + 1));
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             let voiceRecognition = null;
             const setVoiceStatus = message => { if (voiceCommandStatus) voiceCommandStatus.textContent = message; };
